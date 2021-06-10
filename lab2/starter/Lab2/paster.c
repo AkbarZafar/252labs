@@ -182,7 +182,7 @@ int catpng( char* imageName[50] ) {
 
 
     for( int i=0; i < 50 ; i++) {
-        
+        printf("file_name: %s \n", imageName[i] ); 
         unsigned long chunk_length;
         U8* compress_data;        
         unsigned long decomp_length;
