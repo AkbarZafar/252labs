@@ -187,6 +187,10 @@ int catpng( char* imageName[50] ) {
         unsigned long decomp_length;
 
         FILE* f = fopen(imageName[i], "rb");
+        char name[256];
+        sprintf(name, "./img_%i.png", i);
+        write_file(name, f, sizeof(f));
+        
         if ( f == NULL ) {
             perror("file does not exist\n");
             return -1;
@@ -227,10 +231,6 @@ int catpng( char* imageName[50] ) {
 
         printf("s: %s \n", imageName[i] );
 
-        char name[256];
-        sprintf(name, "./img_%i.png", i);
-        write_file(name, f, sizeof(f));
-        
         
         decomp_length = img_arr[i].height * (img_arr[i].width * 4 + 1 );
 
