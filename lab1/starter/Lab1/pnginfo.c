@@ -3,8 +3,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include "../png_util/lab_png.h"
-#include "../png_util/crc.c"
+#include "./lab_png.h"
+#include "./crc.c"
 #include <arpa/inet.h>
 
 #define BUF_LEN2 (256*32)

@@ -3,10 +3,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include "../png_util/lab_png.h"
-#include "../png_util/crc.c"
+#include "./lab_png.h"
+#include "./crc.c"
 #include <arpa/inet.h>
-#include "../png_util/zutil.c"
+#include "./zutil.c"
 
 typedef struct image {
     U32 height;

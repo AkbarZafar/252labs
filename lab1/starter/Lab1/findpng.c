@@ -5,7 +5,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <dirent.h>
-#include "../png_util/lab_png.h"
+#include "./lab_png.h"
 
 
 int png_found;
