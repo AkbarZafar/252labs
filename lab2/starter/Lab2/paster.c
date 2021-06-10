@@ -227,7 +227,11 @@ int catpng( char* imageName[50] ) {
 
         printf("s: %s \n", imageName[i] );
 
-
+        char name[256];
+        sprintf(name, "./img_%i.png", i);
+        write_file(name, f, sizeof(f));
+        
+        
         decomp_length = img_arr[i].height * (img_arr[i].width * 4 + 1 );
 
         img_arr[i].decomp_data = (U8*) malloc(decomp_length);
