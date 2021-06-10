@@ -187,9 +187,6 @@ int catpng( char* imageName[50] ) {
         unsigned long decomp_length;
 
         FILE* f = fopen(imageName[i], "rb");
-        char name[256];
-        sprintf(name, "./img_%i.png", i);
-        write_file(name, f, sizeof(f));
         
         if ( f == NULL ) {
             perror("file does not exist\n");
@@ -228,8 +225,6 @@ int catpng( char* imageName[50] ) {
         fseek(f, 4, SEEK_CUR);
         fread(compress_data, 1, htonl(chunk_length), f);
         fseek(f, 4, SEEK_CUR);
-
-        printf("s: %s \n", imageName[i] );
 
         
         decomp_length = img_arr[i].height * (img_arr[i].width * 4 + 1 );
@@ -351,7 +346,6 @@ int main( int argc, char** argv ) {
     RECV_BUF recv_buf;
     pid_t pid =getpid();
     
-    recv_buf_init(&recv_buf, BUF_SIZE);
     
     if (argc == 1) {
         strcpy(url, IMG_URL); 
@@ -392,6 +386,7 @@ int main( int argc, char** argv ) {
     char* imageNames[50];
     /* get it! */
     while( i < 50 ) {
+        recv_buf_init(&recv_buf, BUF_SIZE);
         res = curl_easy_perform(curl_handle);
 
         if( res != CURLE_OK) {
@@ -409,6 +404,8 @@ int main( int argc, char** argv ) {
             write_file(fname, recv_buf.buf, recv_buf.size);
             i++;
         }
+        recv_buf_cleanup(&recv_buf);
+        
     }
     
     printf("got all the files \n"); 
@@ -416,7 +413,6 @@ int main( int argc, char** argv ) {
     /* cleaning up */
     curl_easy_cleanup(curl_handle);
     curl_global_cleanup();
-    recv_buf_cleanup(&recv_buf);
     return 0;
 }
 
