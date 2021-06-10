@@ -182,7 +182,6 @@ int catpng( char* imageName[50] ) {
 
 
     for( int i=0; i < 50 ; i++) {
-        printf("file_name: %s \n", imageName[i] ); 
         unsigned long chunk_length;
         U8* compress_data;        
         unsigned long decomp_length;
@@ -225,6 +224,8 @@ int catpng( char* imageName[50] ) {
         fseek(f, 4, SEEK_CUR);
         fread(compress_data, 1, htonl(chunk_length), f);
         fseek(f, 4, SEEK_CUR);
+
+        printf("s: %s \n", imageName[i] );
 
 
         decomp_length = img_arr[i].height * (img_arr[i].width * 4 + 1 );
