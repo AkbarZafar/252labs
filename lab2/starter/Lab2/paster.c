@@ -453,6 +453,9 @@ int main( int argc, char** argv ) {
     free(p_tids);
     
     catpng( imageNames );
+    for( int i=0; i<50; i++) {
+        free( imageNames[i]);
+    }
     curl_global_cleanup();
     return 0;
 }
