@@ -11,8 +11,6 @@
 #include "./zutil.c"
 #include <pthread.h>
 
-#define IMG_URL "http://ece252-1.uwaterloo.ca:2520/image?img=1"
-#define DUM_URL "https://example.com/"
 #define ECE252_HEADER "X-Ece252-Fragment: "
 #define BUF_SIZE 1048576  /* 1024*1024 = 1M */
 #define BUF_INC  524288   /* 1024*512  = 0.5M */
@@ -345,16 +343,19 @@ struct thread_args {
 };
 
 int imageCounter;
-char url[256];
 int flags[50];
 char* imageNames[50];
+int n;
+int servernum = 0;
 
 void *getImage( void *arg ){
     CURL *curl_handle;
     char fname[256];
     RECV_BUF recv_buf;
     CURLcode res;
-
+    char url[256];
+    servernum++;
+    sprintf( url, "http://ece252-%i.uwaterloo.ca:2520/image?img=%i", (servernum%3)+1, n);
     /* init a curl session */
     curl_handle = curl_easy_init();
 
@@ -386,10 +387,7 @@ void *getImage( void *arg ){
 
         if( res != CURLE_OK) {
             fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
-        } else {
-	    printf("%lu bytes received in memory %p, seq=%d. i: %i \n", \
-            recv_buf.size, recv_buf.buf, recv_buf.seq, imageCounter);
-        }
+        } 
 
         if( flags[recv_buf.seq] == 0 ) {
             flags[recv_buf.seq] = 1;
@@ -408,25 +406,41 @@ void *getImage( void *arg ){
 
 int main( int argc, char** argv ) {
     memset( flags, 0, sizeof(int)*50 );
+
+    int c;
+    int threads = 1;
+    n = 1;
     
-    if (argc == 1) {
-        strcpy(url, IMG_URL); 
-    } else {
-        strcpy(url, argv[1]);
+    while ((c = getopt (argc, argv, "t:n:")) != -1) {
+        switch (c) {
+        case 't':
+	    threads = strtoul(optarg, NULL, 10);
+	    printf("option -t specifies a value of %d.\n", threads);
+	    if (threads <= 0) {
+                fprintf(stderr, "%s: option requires an argument > 0 -- 't'\n", argv[0]);
+                return -1;
+            }
+            break;
+        case 'n':
+            n = strtoul(optarg, NULL, 10);
+	    printf("option -n specifies a value of %d.\n", n);
+            if (n <= 0 || n > 3) {
+                fprintf(stderr, "%s: option requires an argument 1, 2, or 3 -- 'n'\n", argv[0]);
+                return -1;
+            }
+            break;
+        default:
+            return -1;
+        }
     }
-    printf("%s: URL is %s\n", argv[0], url);
 
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
-
-
     imageCounter = 0;
-    int threads = 2;
     
     pthread_t *p_tids = (pthread_t*) malloc( sizeof(pthread_t) * threads );
 
     for( int i = 0; i < threads; i++ ) {
-        printf("hello, creating a thread\n");
         pthread_create( p_tids + i, NULL, getImage, NULL ); 
     }
     
@@ -434,7 +448,6 @@ int main( int argc, char** argv ) {
 
     for (int i=0; i<threads; i++) {
         pthread_join(p_tids[i], &vr);
-        printf("Thread ID %lu joined.\n", p_tids[i]);
     }
 
     /* cleaning up */
@@ -446,7 +459,5 @@ int main( int argc, char** argv ) {
     curl_global_cleanup();
     return 0;
 }
-
-
 
 
