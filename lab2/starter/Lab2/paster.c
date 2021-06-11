@@ -345,7 +345,7 @@ struct thread_args {
 int imageCounter;
 int flags[50];
 char* imageNames[50];
-int n;
+int n = 1;
 int servernum = 0;
 
 void *getImage( void *arg ){
@@ -402,6 +402,7 @@ void *getImage( void *arg ){
     }
     /* cleaning up */
     curl_easy_cleanup(curl_handle);
+    return( (void*) 0);
 }
 
 int main( int argc, char** argv ) {
@@ -409,13 +410,11 @@ int main( int argc, char** argv ) {
 
     int c;
     int threads = 1;
-    n = 1;
     
     while ((c = getopt (argc, argv, "t:n:")) != -1) {
         switch (c) {
         case 't':
 	    threads = strtoul(optarg, NULL, 10);
-	    printf("option -t specifies a value of %d.\n", threads);
 	    if (threads <= 0) {
                 fprintf(stderr, "%s: option requires an argument > 0 -- 't'\n", argv[0]);
                 return -1;
@@ -423,7 +422,6 @@ int main( int argc, char** argv ) {
             break;
         case 'n':
             n = strtoul(optarg, NULL, 10);
-	    printf("option -n specifies a value of %d.\n", n);
             if (n <= 0 || n > 3) {
                 fprintf(stderr, "%s: option requires an argument 1, 2, or 3 -- 'n'\n", argv[0]);
                 return -1;
@@ -454,7 +452,6 @@ int main( int argc, char** argv ) {
 
     free(p_tids);
     
-    printf("got all the files \n"); 
     catpng( imageNames );
     curl_global_cleanup();
     return 0;
