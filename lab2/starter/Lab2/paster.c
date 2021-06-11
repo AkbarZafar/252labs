@@ -9,6 +9,7 @@
 #include "./crc.c"
 #include <arpa/inet.h>
 #include "./zutil.c"
+#include <pthread.h>
 
 #define IMG_URL "http://ece252-1.uwaterloo.ca:2520/image?img=1"
 #define DUM_URL "https://example.com/"
@@ -338,30 +339,28 @@ int catpng( char* imageName[50] ) {
 
 }
 
-int main( int argc, char** argv ) {
-    CURLcode res;
-    char fname[256];
-    CURL *curl_handle;
-    char url[256];
-    RECV_BUF recv_buf;
-    pid_t pid =getpid();
-    
-    
-    if (argc == 1) {
-        strcpy(url, IMG_URL); 
-    } else {
-        strcpy(url, argv[1]);
-    }
-    printf("%s: URL is %s\n", argv[0], url);
+struct thread_args {
+    int* flags;
+    char* imageNames[50];
+};
 
-    curl_global_init(CURL_GLOBAL_DEFAULT);
+int imageCounter;
+char url[256];
+int flags[50];
+char* imageNames[50];
+
+void *getImage( void *arg ){
+    CURL *curl_handle;
+    char fname[256];
+    RECV_BUF recv_buf;
+    CURLcode res;
 
     /* init a curl session */
     curl_handle = curl_easy_init();
 
     if (curl_handle == NULL) {
         fprintf(stderr, "curl_easy_init: returned NULL\n");
-        return 1;
+        return ((void*) 0);
     }
 
     /* specify URL to get */
@@ -380,12 +379,8 @@ int main( int argc, char** argv ) {
     /* some servers requires a user-agent field */
     curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, "libcurl-agent/1.0");
 
-    int i = 0;
-    int flags[50];
-    memset( flags, 0, sizeof(int)*50 );
-    char* imageNames[50];
     /* get it! */
-    while( i < 50 ) {
+    while( imageCounter < 50 ) {
         recv_buf_init(&recv_buf, BUF_SIZE);
         res = curl_easy_perform(curl_handle);
 
@@ -393,25 +388,61 @@ int main( int argc, char** argv ) {
             fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
         } else {
 	    printf("%lu bytes received in memory %p, seq=%d. i: %i \n", \
-            recv_buf.size, recv_buf.buf, recv_buf.seq, i);
+            recv_buf.size, recv_buf.buf, recv_buf.seq, imageCounter);
         }
 
         if( flags[recv_buf.seq] == 0 ) {
             flags[recv_buf.seq] = 1;
-            sprintf(fname, "./output_%d_%d.png", recv_buf.seq, pid);
+            sprintf(fname, "./output_%d.png", recv_buf.seq);
             imageNames[recv_buf.seq] = (char*) malloc(sizeof(fname));
             memcpy( imageNames[recv_buf.seq], fname, sizeof(fname) );
             write_file(fname, recv_buf.buf, recv_buf.size);
-            i++;
+            imageCounter++;
         }
         recv_buf_cleanup(&recv_buf);
         
     }
+    /* cleaning up */
+    curl_easy_cleanup(curl_handle);
+}
+
+int main( int argc, char** argv ) {
+    memset( flags, 0, sizeof(int)*50 );
+    
+    if (argc == 1) {
+        strcpy(url, IMG_URL); 
+    } else {
+        strcpy(url, argv[1]);
+    }
+    printf("%s: URL is %s\n", argv[0], url);
+
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+
+
+
+    imageCounter = 0;
+    int threads = 2;
+    
+    pthread_t *p_tids = (pthread_t*) malloc( sizeof(pthread_t) * threads );
+
+    for( int i = 0; i < threads; i++ ) {
+        printf("hello, creating a thread\n");
+        pthread_create( p_tids + i, NULL, getImage, NULL ); 
+    }
+    
+    void* vr;
+
+    for (int i=0; i<threads; i++) {
+        pthread_join(p_tids[i], &vr);
+        printf("Thread ID %lu joined.\n", p_tids[i]);
+    }
+
+    /* cleaning up */
+
+    free(p_tids);
     
     printf("got all the files \n"); 
     catpng( imageNames );
-    /* cleaning up */
-    curl_easy_cleanup(curl_handle);
     curl_global_cleanup();
     return 0;
 }
