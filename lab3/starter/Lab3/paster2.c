@@ -305,12 +305,14 @@ int catpng( ) {
 
 }
 
-int* imageCounter;
+int* producerImageCounter;
+int* consumerImageCounter;
 int imageNumber = 1;
 int servernum = 0;
 int SLEEP_TIME = 0;
 
-sem_t* imgCounterSem;
+sem_t* prodimgCounterSem;
+sem_t* consimgCounterSem;
 sem_t* queueSem;
 sem_t* prodCounterSem;
 sem_t* consCounterSem;
@@ -324,16 +326,16 @@ void getImage(){
     int run = 1;
     int part = 0;
 
-    sem_wait( imgCounterSem );
+    sem_wait( prodimgCounterSem );
     run = 0;
-    (*imageCounter)++;
-    if( *imageCounter < 50 ) {
+    (*producerImageCounter)++;
+    if( *producerImageCounter < 50 ) {
         run = 1;
-        part = *imageCounter;
+        part = *producerImageCounter;
     }
-    sem_post( imgCounterSem );
+    sem_post( prodimgCounterSem );
     while( run ) {
-        printf("%i\n", *imageCounter);
+        printf("%i\n", part);
         sprintf( url, "http://ece252-%i.uwaterloo.ca:2530/image?img=%i&part=%i", (servernum%3)+1, imageNumber, part);
         /* init a curl session */
         curl_handle = curl_easy_init();
@@ -370,19 +372,18 @@ void getImage(){
         sem_wait( prodCounterSem );        
         sem_wait( queueSem ); 
         addQueue( &recv_buf ); 
-        printf( "%p\n", &recv_buf );
         sem_post( queueSem );
         sem_post( consCounterSem );    
 
-        sem_wait( imgCounterSem );
+        sem_wait( prodimgCounterSem );
         run = 0;
-        (*imageCounter)++;
-        
-        if( *imageCounter < 50 ) {
+        (*producerImageCounter)++;
+        part = *producerImageCounter; 
+        if( *producerImageCounter < 50 ) {
             run = 1;
 
         }
-        sem_post( imgCounterSem );
+        sem_post( prodimgCounterSem );
         
     }
     /* cleaning up */
@@ -392,7 +393,6 @@ void getImage(){
 
 void producerWork() {
     getImage();
-     
 }
 
 void extractIDAT( RECV_BUF* buf ) {
@@ -464,20 +464,41 @@ void extractIDAT( RECV_BUF* buf ) {
 
 void consumerWork() {
     sleep( SLEEP_TIME );
+    int run = 0;
 
-    while( *imageCounter < 50 ) {
+    sem_wait( consimgCounterSem );
+    run = 0;
+    (*consumerImageCounter)++;
+        
+    if( *consumerImageCounter < 50 ) {
+        run = 1;
+
+    }
+    sem_post( consimgCounterSem );
+
+    while( run ) {
         RECV_BUF* buf = (RECV_BUF*) malloc(sizeof(RECV_BUF));
 
         sem_wait( consCounterSem );
         sem_wait( queueSem );
         
         removeQueue( buf );
+        printf("%i\n", buf->seq);
         extractIDAT( buf );
 
 
         sem_post( queueSem );
         sem_post( prodCounterSem );
 
+        sem_wait( consimgCounterSem );
+        run = 0;
+        (*consumerImageCounter)++;
+        
+        if( *consumerImageCounter < 50 ) {
+            run = 1;
+
+        }
+        sem_post( consimgCounterSem );
     }
 }
 
@@ -497,17 +518,25 @@ int main( int argc, char** argv ) {
     queue = (CIRCLE_Q*) shmat( shmQueueId, NULL, 0);
     init_shm_queue( queue, B ); 
 
-    int shmImageCounterId = shmget( IPC_PRIVATE, sizeof(int), IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
-    imageCounter = (int*) shmat( shmImageCounterId, NULL, 0);
-    *imageCounter = 0; 
+    int shmprodImageCounterId = shmget( IPC_PRIVATE, sizeof(int), IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
+    producerImageCounter = (int*) shmat( shmprodImageCounterId, NULL, 0);
+    *producerImageCounter = -1; 
     
+    int shmconsImageCounterId = shmget( IPC_PRIVATE, sizeof(int), IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
+    consumerImageCounter = (int*) shmat( shmconsImageCounterId, NULL, 0);
+    *consumerImageCounter = -1; 
+
     int shmQueueSemId =  shmget(IPC_PRIVATE, sizeof(sem_t), IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
     queueSem = (sem_t*) shmat( shmQueueSemId, NULL, 0);
     sem_init( queueSem, 1, 1 );
 
-    int shmIMGCounterSemId = shmget(IPC_PRIVATE, sizeof(sem_t), IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
-    imgCounterSem = (sem_t*) shmat( shmIMGCounterSemId, NULL, 0);
-    sem_init( imgCounterSem, 1, 1);    
+    int shmprodIMGCounterSemId = shmget(IPC_PRIVATE, sizeof(sem_t), IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
+    prodimgCounterSem = (sem_t*) shmat( shmprodIMGCounterSemId, NULL, 0);
+    sem_init( prodimgCounterSem, 1, 1);    
+
+    int shmconsIMGCounterSemId = shmget(IPC_PRIVATE, sizeof(sem_t), IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR); 
+    consimgCounterSem = (sem_t*) shmat( shmconsIMGCounterSemId, NULL, 0);
+    sem_init( consimgCounterSem, 1, 1);    
     
     int shmProdQueueSpaceId = shmget(IPC_PRIVATE, sizeof(sem_t), IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
     prodCounterSem = (sem_t*) shmat( shmProdQueueSpaceId, NULL, 0);
