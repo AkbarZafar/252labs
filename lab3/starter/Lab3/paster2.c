@@ -101,7 +101,7 @@ int init_shm_queue( CIRCLE_Q* p, int stack_size ) {
  */
 size_t header_cb_curl(char *p_recv, size_t size, size_t nmemb, void *userdata) {
     int realsize = size * nmemb;
-    RECV_BUF *p = userdata;
+    RECV_BUF *p = (RECV_BUF*) userdata;
     
     if (realsize > strlen(ECE252_HEADER) &&
 	strncmp(p_recv, ECE252_HEADER, strlen(ECE252_HEADER)) == 0) {
@@ -203,14 +203,15 @@ typedef struct image {
     U32 height;
     U32 width;
 
-    U8* decomp_data;
+    U8 decomp_data[BUF_SIZE];
     unsigned long decomp_length;
 } Image;
 
-Image img_arr[50];
-unsigned long total_data_length = 0;
+Image* img_arr;
+unsigned long* total_data_length;
+sem_t* totalDataSem;
 
-int catpng( ) {
+int catpng() {
     FILE* f = fopen("all.png", "w");
     FILE* f2 = fopen( "./output_0.png", "rb"); 
 
@@ -260,14 +261,13 @@ int catpng( ) {
     
     fseek(f2, 8, SEEK_CUR);
     unsigned long cursor = 0;
-    U8* total_data = (U8*)malloc(total_data_length); 
-
+    U8* total_data = (U8*)malloc(*total_data_length); 
     for( int i=0; i < 50; i++ ){
         memcpy( &total_data[cursor], img_arr[i].decomp_data, img_arr[i].decomp_length );
         cursor += img_arr[i].decomp_length;
-
-        free( img_arr[i].decomp_data ); 
+        printf("i: %i,%li\n",i, cursor);
     }
+    printf("hello\n");
     U8* comp_data = (U8*)malloc(cursor + 100);
     unsigned long comp_data_length = 0;
     mem_def( comp_data, &comp_data_length, total_data, cursor, Z_DEFAULT_COMPRESSION);
@@ -335,14 +335,13 @@ void getImage(){
     }
     sem_post( prodimgCounterSem );
     while( run ) {
-        printf("%i\n", part);
         sprintf( url, "http://ece252-%i.uwaterloo.ca:2530/image?img=%i&part=%i", (servernum%3)+1, imageNumber, part);
         /* init a curl session */
         curl_handle = curl_easy_init();
 
         if (curl_handle == NULL) {
             fprintf(stderr, "curl_easy_init: returned NULL\n");
-            return ;
+            return;
         }
 
         /* specify URL to get */
@@ -396,12 +395,8 @@ void producerWork() {
 }
 
 void extractIDAT( RECV_BUF* buf ) {
-    U32 height_final = 0;
-    U32 width_final = 0;
-
     char fname[256];
     sprintf(fname, "./output_%d.png", buf->seq); 
-    printf("%s\n", fname); 
     write_file( fname, buf->buf, buf->size );
 
     unsigned long chunk_length;
@@ -432,11 +427,6 @@ void extractIDAT( RECV_BUF* buf ) {
     fseek(f, 8, SEEK_CUR);
     fread(&(img_arr[buf->seq].width), 1, 4, f);
     fread(&(img_arr[buf->seq].height), 1, 4, f);
-
-    if(width_final == 0) {
-        width_final = htonl(img_arr[buf->seq].width);
-    }
-    height_final += htonl(img_arr[buf->seq].height);
     
     fseek(f, 9, SEEK_CUR);
 
@@ -451,10 +441,12 @@ void extractIDAT( RECV_BUF* buf ) {
         
     decomp_length = img_arr[buf->seq].height * (img_arr[buf->seq].width * 4 + 1 );
 
-    img_arr[buf->seq].decomp_data = (U8*) malloc(decomp_length);
-
     mem_inf( img_arr[buf->seq].decomp_data, &img_arr[buf->seq].decomp_length, compress_data, htonl(chunk_length)); 
-    total_data_length += img_arr[buf->seq].decomp_length;
+
+    sem_wait( totalDataSem );
+    *(total_data_length) += img_arr[buf->seq].decomp_length;
+    sem_post( totalDataSem );    
+
         
     free( compress_data );
 
@@ -483,7 +475,6 @@ void consumerWork() {
         sem_wait( queueSem );
         
         removeQueue( buf );
-        printf("%i\n", buf->seq);
         extractIDAT( buf );
 
 
@@ -545,6 +536,18 @@ int main( int argc, char** argv ) {
     int shmConsQueueSpaceId = shmget(IPC_PRIVATE, sizeof(sem_t), IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
     consCounterSem = (sem_t*) shmat( shmConsQueueSpaceId, NULL, 0);
     sem_init( consCounterSem, 1, 0 );
+
+    int shmImgArr = shmget(IPC_PRIVATE, sizeof(Image)*50, IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
+    img_arr = (Image*) shmat( shmImgArr, NULL, 0 );
+
+    int shmtotDataId = shmget(IPC_PRIVATE, sizeof(Image)*50, IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
+    total_data_length = (unsigned long*) shmat( shmtotDataId, NULL, 0 );
+    *(total_data_length) = 0;
+
+    int shmtotDataSemId = shmget(IPC_PRIVATE, sizeof(Image)*50, IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
+    totalDataSem = (sem_t*) shmat( shmtotDataSemId, NULL, 0 );
+    sem_init(totalDataSem, 1, 1);
+
 
     pid_t prod_pids[P];
     pid_t cons_pids[C];
