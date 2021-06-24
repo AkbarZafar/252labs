@@ -9,6 +9,7 @@
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <sys/shm.h>
+#include <semaphore.h>
 #include "./lab_png.h"
 #include "./crc.c"
 #include "./zutil.c"
@@ -45,42 +46,28 @@ typedef struct circleQ {
 
 CIRCLE_Q* queue;
 
-int isFull() {
-    if(queue->front == queue->rear + 1 || (queue->front == 0 && queue->rear == queue->SIZE - 1)) return 1;
-    return 1;
-}
+/* circle queue replicated from programiz.com */
 
-int isEmpty() {
-    if ( queue->front == -1) return 1;
-    return 0;
-}
-
-int addQueue( RECV_BUF element ) {
-    if( isFull() ) {
-        printf("QUEUE IS FULL\n");
-        return -1;
-    } 
-
-    if( queue->front == -1 ) queue->front = 0;
-    
-    queue->rear = ( queue->rear + 1) % queue->SIZE;
-    queue->items[queue->rear] = element;
-    return 0;
-}
-
-RECV_BUF removeQueue(){
-    RECV_BUF element;
-
-    if( !isEmpty() ) {
-        element = queue->items[queue->front];
-        if (queue->front == queue->rear) {
-            queue->front = -1;
-            queue->rear = -1;
-        } else {
-            queue->front = ( queue->front + 1) % queue->SIZE;
-        }
+void addQueue( RECV_BUF* element ) {
+    if( queue->front == -1 ) {
+        queue->front = 0;
     }
-    return element;
+
+    queue->rear = (queue->rear + 1) % queue->SIZE;
+    memcpy( &( queue->items[queue->rear] ), element, sizeof( RECV_BUF ) );
+    printf( "added to queue\n" );
+}
+
+void removeQueue( RECV_BUF* element ){
+    memcpy( element, &(queue->items[queue->front]), sizeof(RECV_BUF));
+
+    if( queue->front == queue->rear ) {
+        queue->front = -1;
+        queue->rear = -1;
+    } else {
+        queue->front = ( queue->front + 1) % queue->SIZE;
+    }
+    printf("removed from queue\n");
 }
 
 int init_shm_queue( CIRCLE_Q* p, int stack_size ) {
@@ -230,78 +217,12 @@ typedef struct image {
     unsigned long decomp_length;
 } Image;
 
-int catpng( char* imageName[50] ) {
+Image img_arr[50];
+unsigned long total_data_length = 0;
 
-    U32 height_final = 0;
-    U32 width_final = 0;
-        
-    Image* img_arr = (Image*)malloc(sizeof(Image)*(50));
-    unsigned long total_data_length = 0;
-
-
-    for( int i=0; i < 50 ; i++) {
-        unsigned long chunk_length;
-        U8* compress_data;        
-        unsigned long decomp_length;
-
-        FILE* f = fopen(imageName[i], "rb");
-        
-        if ( f == NULL ) {
-            perror("file does not exist\n");
-            return -1;
-        }
-    
-        U8 *header = (U8*)malloc(8);
-        
-        fread(header, 1, 8, f);
-
-        if( !((U8)header[0] == 0x89 && header[1] == 'P' 
-                && header[2] == 'N' && header[3] == 'G'
-                && (U8)header[4] == 0x0D && (U8)header[5] == 0x0A
-                && (U8)header[6] == 0x1A && (U8)header[7] == 0x0A) ) {
-            printf("%s: Not a PNG file\n", imageName[i]);
-            return -1;
-        }
-
-        free( header );
-    
-        fseek(f, 8, SEEK_CUR);
-        fread(&(img_arr[i].width), 1, 4, f);
-        fread(&(img_arr[i].height), 1, 4, f);
-
-        if(width_final == 0) {
-            width_final = htonl(img_arr[i].width);
-        }
-        height_final += htonl(img_arr[i].height);
-    
-        fseek(f, 9, SEEK_CUR);
-
-        fread(&(chunk_length), 1, 4, f);
-
-
-        compress_data = (U8*) malloc(htonl(chunk_length));
-        fseek(f, 4, SEEK_CUR);
-        fread(compress_data, 1, htonl(chunk_length), f);
-        fseek(f, 4, SEEK_CUR);
-
-        
-        decomp_length = img_arr[i].height * (img_arr[i].width * 4 + 1 );
-
-        img_arr[i].decomp_data = (U8*) malloc(decomp_length);
-
-        mem_inf( img_arr[i].decomp_data, &img_arr[i].decomp_length, compress_data, htonl(chunk_length)); 
-        total_data_length += img_arr[i].decomp_length;
-        
-        free( compress_data );
-
-        fclose(f);
-        
-
-    }
-
-    
+int catpng( ) {
     FILE* f = fopen("all.png", "w");
-    FILE* f2 = fopen( imageName[0], "rb"); 
+    FILE* f2 = fopen( "./output_0.png", "rb"); 
 
 
     U8* header_prev = (U8*)malloc(8);
@@ -324,8 +245,8 @@ int catpng( char* imageName[50] ) {
     U8* data = (U8*) malloc(13);
     fread( data, 1, 13, f2);
 
-    U32 width_htonl = htonl(width_final);
-    U32 height_htonl = htonl(height_final);
+    U32 width_htonl = htonl(400);
+    U32 height_htonl = htonl(300);
     fwrite( &width_htonl, sizeof(U8), 4, f);
     fwrite( &height_htonl, sizeof(U8), 4, f);
 
@@ -388,58 +309,56 @@ int catpng( char* imageName[50] ) {
     
     fwrite( IEND, 1, 12, f);
     
-    free(img_arr);
-
     fclose( f );
     fclose( f2 );
     return 0;
 
 }
-struct thread_args {
-    int* flags;
-    char* imageNames[50];
-};
 
 int* imageCounter;
 int flags[50];
-char* imageNames[50];
 int imageNumber = 1;
 int servernum = 0;
+int SLEEP_TIME = 0;
 
-void getImage( int imageSegmentNum ){
+sem_t* imgCounterSem;
+sem_t* queueSem;
+sem_t* prodCounterSem;
+sem_t* consCounterSem;
+
+void getImage(){
     CURL *curl_handle;
-    char fname[256];
     RECV_BUF recv_buf;
     CURLcode res;
     char url[256];
     servernum++;
-    sprintf( url, "http://ece252-%i.uwaterloo.ca:2530/image?img=%i&part=%i", (servernum%3)+1, imageNumber, imageSegmentNum);
-    /* init a curl session */
-    curl_handle = curl_easy_init();
+    while( *imageCounter < 50 ) {
+        sprintf( url, "http://ece252-%i.uwaterloo.ca:2530/image?img=%i&part=%i", (servernum%3)+1, imageNumber, *imageCounter);
+        /* init a curl session */
+        curl_handle = curl_easy_init();
 
-    if (curl_handle == NULL) {
-        fprintf(stderr, "curl_easy_init: returned NULL\n");
-        return ;
-    }
+        if (curl_handle == NULL) {
+            fprintf(stderr, "curl_easy_init: returned NULL\n");
+            return ;
+        }
 
-    /* specify URL to get */
-    curl_easy_setopt(curl_handle, CURLOPT_URL, url);
+        /* specify URL to get */
+        curl_easy_setopt(curl_handle, CURLOPT_URL, url);
 
-    /* register write call back function to process received data */
-    curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, write_cb_curl3); 
-    /* user defined data structure passed to the call back function */
-    curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)&recv_buf);
+        /* register write call back function to process received data */
+        curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, write_cb_curl3); 
+        /* user defined data structure passed to the call back function */
+        curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)&recv_buf);
 
-    /* register header call back function to process received header data */
-    curl_easy_setopt(curl_handle, CURLOPT_HEADERFUNCTION, header_cb_curl); 
-    /* user defined data structure passed to the call back function */
-    curl_easy_setopt(curl_handle, CURLOPT_HEADERDATA, (void *)&recv_buf);
+        /* register header call back function to process received header data */
+        curl_easy_setopt(curl_handle, CURLOPT_HEADERFUNCTION, header_cb_curl); 
+        /* user defined data structure passed to the call back function */
+        curl_easy_setopt(curl_handle, CURLOPT_HEADERDATA, (void *)&recv_buf);
 
-    /* some servers requires a user-agent field */
-    curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, "libcurl-agent/1.0");
+        /* some servers requires a user-agent field */
+        curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, "libcurl-agent/1.0");
 
-    /* get it! */
-    while( imageCounter < 50 ) {
+        /* get it! */
         recv_buf_init(&recv_buf, BUF_SIZE);
         res = curl_easy_perform(curl_handle);
 
@@ -447,15 +366,15 @@ void getImage( int imageSegmentNum ){
             fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
         } 
 
-        if( flags[recv_buf.seq] == 0 ) {
-            flags[recv_buf.seq] = 1;
-            sprintf(fname, "./output_%d.png", recv_buf.seq);
-            imageNames[recv_buf.seq] = (char*) malloc(sizeof(fname));
-            memcpy( imageNames[recv_buf.seq], fname, sizeof(fname) );
-            write_file(fname, recv_buf.buf, recv_buf.size);
-            imageCounter++;
-        }
-        recv_buf_cleanup(&recv_buf);
+        sem_wait( prodCounterSem );        
+        sem_wait( queueSem ); 
+        addQueue( &recv_buf ); 
+        sem_post( queueSem );
+        sem_post( consCounterSem );    
+
+        sem_wait( imgCounterSem );
+        (*imageCounter)++;
+        sem_post( imgCounterSem );
         
     }
     /* cleaning up */
@@ -464,12 +383,93 @@ void getImage( int imageSegmentNum ){
 }
 
 void producerWork() {
+    getImage();
+     
+}
+
+void extractIDAT( RECV_BUF* buf ) {
+    U32 height_final = 0;
+    U32 width_final = 0;
+
+    char fname[256];
+    sprintf(fname, "./output_%d.png", buf->seq); 
+    write_file( fname, buf->buf, buf->size );
     
+    recv_buf_cleanup( buf );
+ 
+
+    unsigned long chunk_length;
+    U8* compress_data;        
+    unsigned long decomp_length;
+
+    FILE* f = fopen(fname, "rb");
+        
+    if ( f == NULL ) {
+        perror("file does not exist\n");
+        return;
+    }
+    
+    U8 *header = (U8*)malloc(8);
+        
+    fread(header, 1, 8, f);
+
+    if( !((U8)header[0] == 0x89 && header[1] == 'P' 
+            && header[2] == 'N' && header[3] == 'G'
+            && (U8)header[4] == 0x0D && (U8)header[5] == 0x0A
+            && (U8)header[6] == 0x1A && (U8)header[7] == 0x0A) ) {
+        printf("%s: Not a PNG file\n", fname);
+        return;
+    }
+
+    free( header );
+    
+    fseek(f, 8, SEEK_CUR);
+    fread(&(img_arr[buf->seq].width), 1, 4, f);
+    fread(&(img_arr[buf->seq].height), 1, 4, f);
+
+    if(width_final == 0) {
+        width_final = htonl(img_arr[buf->seq].width);
+    }
+    height_final += htonl(img_arr[buf->seq].height);
+    
+    fseek(f, 9, SEEK_CUR);
+
+    fread(&(chunk_length), 1, 4, f);
+
+
+    compress_data = (U8*) malloc(htonl(chunk_length));
+    fseek(f, 4, SEEK_CUR);
+    fread(compress_data, 1, htonl(chunk_length), f);
+    fseek(f, 4, SEEK_CUR);
+
+        
+    decomp_length = img_arr[buf->seq].height * (img_arr[buf->seq].width * 4 + 1 );
+
+    img_arr[buf->seq].decomp_data = (U8*) malloc(decomp_length);
+
+    mem_inf( img_arr[buf->seq].decomp_data, &img_arr[buf->seq].decomp_length, compress_data, htonl(chunk_length)); 
+    total_data_length += img_arr[buf->seq].decomp_length;
+        
+    free( compress_data );
+
+    fclose(f);
+
 }
 
 void consumerWork() {
+    sleep( SLEEP_TIME );
+    RECV_BUF* buf = (RECV_BUF*) malloc(sizeof(RECV_BUF));;
+
+    sem_wait( consCounterSem );
+    sem_wait( queueSem );
+    removeQueue( buf );
+    extractIDAT( buf );
+    sem_post( queueSem );
+    sem_post( prodCounterSem );
 
 
+    printf("%i\n", buf->seq );
+    free( buf ); 
 }
 
 int main( int argc, char** argv ) {
@@ -480,19 +480,36 @@ int main( int argc, char** argv ) {
     int C = atoi(argv[3]);
     int X = atoi(argv[4]);
     int N = atoi(argv[5]);
+
     imageNumber = N;
+    SLEEP_TIME = X;
     
     int SHM_SIZE = (sizeof(CIRCLE_Q)) + (sizeof(RECV_BUF) * B);
 
     int shmQueueId = shmget( IPC_PRIVATE, SHM_SIZE, IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
     queue = (CIRCLE_Q*) shmat( shmQueueId, NULL, 0);
     init_shm_queue( queue, B ); 
-    
+
     int shmImageCounterId = shmget( IPC_PRIVATE, sizeof(int), IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
     imageCounter = (int*) shmat( shmImageCounterId, NULL, 0);
     *imageCounter = 0; 
-
     
+    int shmQueueSemId =  shmget(IPC_PRIVATE, sizeof(sem_t), IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
+    queueSem = (sem_t*) shmat( shmQueueSemId, NULL, 0);
+    sem_init( queueSem, 1, 1 );
+
+    int shmIMGCounterSemId = shmget(IPC_PRIVATE, sizeof(sem_t), IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
+    imgCounterSem = (sem_t*) shmat( shmIMGCounterSemId, NULL, 0);
+    sem_init( imgCounterSem, 1, 1);    
+    
+    int shmProdQueueSpaceId = shmget(IPC_PRIVATE, sizeof(sem_t), IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
+    prodCounterSem = (sem_t*) shmat( shmProdQueueSpaceId, NULL, 0);
+    sem_init( prodCounterSem, 1, B );
+    
+    int shmConsQueueSpaceId = shmget(IPC_PRIVATE, sizeof(sem_t), IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
+    consCounterSem = (sem_t*) shmat( shmConsQueueSpaceId, NULL, 0);
+    sem_init( consCounterSem, 1, 0 );
+
     pid_t prod_pids[P];
     pid_t cons_pids[C];
 
@@ -502,7 +519,7 @@ int main( int argc, char** argv ) {
         pid = fork();
         if( pid == 0 ) {
             producerWork();
-            break;
+            exit(0);
         } else {
             prod_pids[i] = pid;
         }
@@ -512,15 +529,13 @@ int main( int argc, char** argv ) {
         pid = fork();
         if( pid == 0 ) {
             consumerWork();
-            break;
+            exit(0);
         } else {
             cons_pids[i] = pid;
         }
-
     }
 
     if ( pid > 0 ) {
-        
         for( int i = 0; i < P; i++ ) {
             waitpid(prod_pids[i], &state, 0);
         }
@@ -536,10 +551,8 @@ int main( int argc, char** argv ) {
     /* cleaning up */
 
     
-    catpng( imageNames );
-    for( int i=0; i<50; i++) {
-        free( imageNames[i]);
-    }
+    catpng( );
+
     curl_global_cleanup();
     return 0;
 }
