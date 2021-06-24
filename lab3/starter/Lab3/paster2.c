@@ -24,7 +24,7 @@
      _a > _b ? _a : _b; })
 
 typedef struct recv_buf2 {
-    char *buf;       /* memory to hold a copy of received data */
+    char buf[BUF_SIZE];       /* memory to hold a copy of received data */
     size_t size;     /* size of valid data in buf in bytes*/
     size_t max_size; /* max capacity of buf in bytes*/
     int seq;         /* >=0 sequence number extracted from http header */
@@ -56,6 +56,7 @@ void addQueue( RECV_BUF* element ) {
     queue->rear = (queue->rear + 1) % queue->SIZE;
     memcpy( &( queue->items[queue->rear] ), element, sizeof( RECV_BUF ) );
     printf( "added to queue\n" );
+    return;
 }
 
 void removeQueue( RECV_BUF* element ){
@@ -68,6 +69,7 @@ void removeQueue( RECV_BUF* element ){
         queue->front = ( queue->front + 1) % queue->SIZE;
     }
     printf("removed from queue\n");
+    return;
 }
 
 int init_shm_queue( CIRCLE_Q* p, int stack_size ) {
@@ -125,18 +127,6 @@ size_t write_cb_curl3(char *p_recv, size_t size, size_t nmemb, void *p_userdata)
     size_t realsize = size * nmemb;
     RECV_BUF *p = (RECV_BUF *)p_userdata;
  
-    if (p->size + realsize + 1 > p->max_size) {/* hope this rarely happens */ 
-        /* received data is not 0 terminated, add one byte for terminating 0 */
-        size_t new_size = p->max_size + max(BUF_INC, realsize + 1);   
-        char *q = realloc(p->buf, new_size);
-        if (q == NULL) {
-            perror("realloc"); /* out of memory */
-            return -1;
-        }
-        p->buf = q;
-        p->max_size = new_size;
-    }
-
     memcpy(p->buf + p->size, p_recv, realsize); /*copy data from libcurl*/
     p->size += realsize;
     p->buf[p->size] = 0;
@@ -157,7 +147,7 @@ int recv_buf_init(RECV_BUF *ptr, size_t max_size) {
 	return 2;
     }
     
-    ptr->buf = p;
+    memset(ptr->buf, 0, BUF_SIZE);
     ptr->size = 0;
     ptr->max_size = max_size;
     ptr->seq = -1;              /* valid seq should be non-negative */
@@ -316,7 +306,6 @@ int catpng( ) {
 }
 
 int* imageCounter;
-int flags[50];
 int imageNumber = 1;
 int servernum = 0;
 int SLEEP_TIME = 0;
@@ -332,8 +321,20 @@ void getImage(){
     CURLcode res;
     char url[256];
     servernum++;
-    while( *imageCounter < 50 ) {
-        sprintf( url, "http://ece252-%i.uwaterloo.ca:2530/image?img=%i&part=%i", (servernum%3)+1, imageNumber, *imageCounter);
+    int run = 1;
+    int part = 0;
+
+    sem_wait( imgCounterSem );
+    run = 0;
+    (*imageCounter)++;
+    if( *imageCounter < 50 ) {
+        run = 1;
+        part = *imageCounter;
+    }
+    sem_post( imgCounterSem );
+    while( run ) {
+        printf("%i\n", *imageCounter);
+        sprintf( url, "http://ece252-%i.uwaterloo.ca:2530/image?img=%i&part=%i", (servernum%3)+1, imageNumber, part);
         /* init a curl session */
         curl_handle = curl_easy_init();
 
@@ -369,11 +370,18 @@ void getImage(){
         sem_wait( prodCounterSem );        
         sem_wait( queueSem ); 
         addQueue( &recv_buf ); 
+        printf( "%p\n", &recv_buf );
         sem_post( queueSem );
         sem_post( consCounterSem );    
 
         sem_wait( imgCounterSem );
+        run = 0;
         (*imageCounter)++;
+        
+        if( *imageCounter < 50 ) {
+            run = 1;
+
+        }
         sem_post( imgCounterSem );
         
     }
@@ -393,10 +401,8 @@ void extractIDAT( RECV_BUF* buf ) {
 
     char fname[256];
     sprintf(fname, "./output_%d.png", buf->seq); 
+    printf("%s\n", fname); 
     write_file( fname, buf->buf, buf->size );
-    
-    recv_buf_cleanup( buf );
- 
 
     unsigned long chunk_length;
     U8* compress_data;        
@@ -453,28 +459,29 @@ void extractIDAT( RECV_BUF* buf ) {
     free( compress_data );
 
     fclose(f);
-
+    recv_buf_cleanup( buf );
 }
 
 void consumerWork() {
     sleep( SLEEP_TIME );
-    RECV_BUF* buf = (RECV_BUF*) malloc(sizeof(RECV_BUF));;
 
-    sem_wait( consCounterSem );
-    sem_wait( queueSem );
-    removeQueue( buf );
-    extractIDAT( buf );
-    sem_post( queueSem );
-    sem_post( prodCounterSem );
+    while( *imageCounter < 50 ) {
+        RECV_BUF* buf = (RECV_BUF*) malloc(sizeof(RECV_BUF));
+
+        sem_wait( consCounterSem );
+        sem_wait( queueSem );
+        
+        removeQueue( buf );
+        extractIDAT( buf );
 
 
-    printf("%i\n", buf->seq );
-    free( buf ); 
+        sem_post( queueSem );
+        sem_post( prodCounterSem );
+
+    }
 }
 
 int main( int argc, char** argv ) {
-    memset( flags, 0, sizeof(int)*50 );
-
     int B = atoi(argv[1]);
     int P = atoi(argv[2]);
     int C = atoi(argv[3]);
