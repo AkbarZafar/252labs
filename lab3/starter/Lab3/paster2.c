@@ -76,7 +76,7 @@ int init_shm_queue( CIRCLE_Q* p, int stack_size ) {
     p->SIZE = stack_size;
     p->front = -1;
     p->rear = -1;
-    p->items = (RECV_BUF*) ( p + sizeof( CIRCLE_Q ) ); 
+    p->items = (RECV_BUF*) ( (void*) p + sizeof( CIRCLE_Q ) ); 
     
     return 0;
 }
@@ -503,8 +503,7 @@ int main( int argc, char** argv ) {
 
     imageNumber = N;
     SLEEP_TIME = X;
-    printf("%i\n", B); 
-    int SHM_SIZE = (sizeof(CIRCLE_Q)) + (sizeof(RECV_BUF) * (B + 1));
+    int SHM_SIZE = (sizeof(CIRCLE_Q)) + (sizeof(RECV_BUF) * B);
 
     int shmQueueId = shmget( IPC_PRIVATE, SHM_SIZE, IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
     queue = (CIRCLE_Q*) shmat( shmQueueId, NULL, 0);
