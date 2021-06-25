@@ -10,6 +10,8 @@
 #include <sys/stat.h>
 #include <sys/shm.h>
 #include <semaphore.h>
+#include <time.h>
+#include <sys/time.h>
 #include "./lab_png.h"
 #include "./crc.c"
 #include "./zutil.c"
@@ -55,7 +57,6 @@ void addQueue( RECV_BUF* element ) {
 
     queue->rear = (queue->rear + 1) % queue->SIZE;
     memcpy( &( queue->items[queue->rear] ), element, sizeof( RECV_BUF ) );
-    printf( "added to queue\n" );
     return;
 }
 
@@ -68,17 +69,12 @@ void removeQueue( RECV_BUF* element ){
     } else {
         queue->front = ( queue->front + 1) % queue->SIZE;
     }
-    printf("removed from queue\n");
     return;
 }
 
 int init_shm_queue( CIRCLE_Q* p, int stack_size ) {
-    if( p == NULL || stack_size == 0 ) {
-        return 1;
-    }
-
     p->SIZE = stack_size;
-    p->rear = -1;
+    p->front = -1;
     p->rear = -1;
     p->items = (RECV_BUF*) ( p + sizeof( CIRCLE_Q ) ); 
     
@@ -265,9 +261,7 @@ int catpng() {
     for( int i=0; i < 50; i++ ){
         memcpy( &total_data[cursor], img_arr[i].decomp_data, img_arr[i].decomp_length );
         cursor += img_arr[i].decomp_length;
-        printf("i: %i,%li\n",i, cursor);
     }
-    printf("hello\n");
     U8* comp_data = (U8*)malloc(cursor + 100);
     unsigned long comp_data_length = 0;
     mem_def( comp_data, &comp_data_length, total_data, cursor, Z_DEFAULT_COMPRESSION);
@@ -322,7 +316,6 @@ void getImage(){
     RECV_BUF recv_buf;
     CURLcode res;
     char url[256];
-    servernum++;
     int run = 1;
     int part = 0;
 
@@ -335,7 +328,7 @@ void getImage(){
     }
     sem_post( prodimgCounterSem );
     while( run ) {
-        sprintf( url, "http://ece252-%i.uwaterloo.ca:2530/image?img=%i&part=%i", (servernum%3)+1, imageNumber, part);
+        sprintf( url, "http://ece252-1.uwaterloo.ca:2530/image?img=%i&part=%i", imageNumber, part);
         /* init a curl session */
         curl_handle = curl_easy_init();
 
@@ -367,7 +360,6 @@ void getImage(){
         if( res != CURLE_OK) {
             fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
         } 
-
         sem_wait( prodCounterSem );        
         sem_wait( queueSem ); 
         addQueue( &recv_buf ); 
@@ -451,7 +443,6 @@ void extractIDAT( RECV_BUF* buf ) {
     free( compress_data );
 
     fclose(f);
-    recv_buf_cleanup( buf );
 }
 
 void consumerWork() {
@@ -494,6 +485,16 @@ void consumerWork() {
 }
 
 int main( int argc, char** argv ) {
+    struct timeval tv;
+    double times[2];
+
+    if( gettimeofday(&tv, NULL) != 0 ) {
+        perror("gettimeofday");
+        abort();
+    }
+
+    times[0] = (tv.tv_sec) + tv.tv_usec/1000000;
+    
     int B = atoi(argv[1]);
     int P = atoi(argv[2]);
     int C = atoi(argv[3]);
@@ -502,8 +503,8 @@ int main( int argc, char** argv ) {
 
     imageNumber = N;
     SLEEP_TIME = X;
-    
-    int SHM_SIZE = (sizeof(CIRCLE_Q)) + (sizeof(RECV_BUF) * B);
+    printf("%i\n", B); 
+    int SHM_SIZE = (sizeof(CIRCLE_Q)) + (sizeof(RECV_BUF) * (B + 1));
 
     int shmQueueId = shmget( IPC_PRIVATE, SHM_SIZE, IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
     queue = (CIRCLE_Q*) shmat( shmQueueId, NULL, 0);
@@ -554,6 +555,7 @@ int main( int argc, char** argv ) {
 
     pid_t pid;
     int state;
+    curl_global_init(CURL_GLOBAL_DEFAULT);
     for( int i = 0; i < P; i++) {
         pid = fork();
         if( pid == 0 ) {
@@ -584,13 +586,51 @@ int main( int argc, char** argv ) {
         }
     }
     
-
-    curl_global_init(CURL_GLOBAL_DEFAULT);
-
     /* cleaning up */
 
     
     catpng( );
+    
+    if( gettimeofday(&tv, NULL) != 0) {
+        perror("gettimeofday");
+        abort();
+    }
+    times[1] = (tv.tv_sec) + tv.tv_usec/1000000.;
+    printf("paster2 execution time: %.6lf seconds\n", times[1] - times[0] );
+
+    shmctl( shmQueueId, IPC_RMID, NULL );
+    shmdt( queue );
+
+    shmctl( shmprodImageCounterId, IPC_RMID, NULL );
+    shmdt( producerImageCounter );
+
+    shmctl( shmconsImageCounterId, IPC_RMID, NULL );
+    shmdt( consumerImageCounter );
+
+    shmctl( shmQueueSemId, IPC_RMID, NULL );
+    shmdt( queueSem );
+
+    shmctl( shmprodIMGCounterSemId, IPC_RMID, NULL );
+    shmdt( prodimgCounterSem );
+
+    shmctl( shmconsIMGCounterSemId, IPC_RMID, NULL );
+    shmdt( consimgCounterSem );
+ 
+    shmctl( shmProdQueueSpaceId, IPC_RMID, NULL );
+    shmdt( prodCounterSem );
+  
+    shmctl( shmConsQueueSpaceId, IPC_RMID, NULL );
+    shmdt( consCounterSem );
+  
+    shmctl( shmImgArr, IPC_RMID, NULL );
+    shmdt( img_arr );
+  
+    shmctl( shmtotDataId, IPC_RMID, NULL );
+    shmdt( total_data_length );
+  
+    shmctl( shmtotDataSemId, IPC_RMID, NULL );
+    shmdt( totalDataSem );
+  
 
     curl_global_cleanup();
     return 0;
