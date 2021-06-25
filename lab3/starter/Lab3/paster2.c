@@ -393,7 +393,6 @@ void extractIDAT( RECV_BUF* buf ) {
 
     unsigned long chunk_length;
     U8* compress_data;        
-    unsigned long decomp_length;
 
     FILE* f = fopen(fname, "rb");
         
@@ -431,7 +430,6 @@ void extractIDAT( RECV_BUF* buf ) {
     fseek(f, 4, SEEK_CUR);
 
         
-    decomp_length = img_arr[buf->seq].height * (img_arr[buf->seq].width * 4 + 1 );
 
     mem_inf( img_arr[buf->seq].decomp_data, &img_arr[buf->seq].decomp_length, compress_data, htonl(chunk_length)); 
 
@@ -446,9 +444,8 @@ void extractIDAT( RECV_BUF* buf ) {
 }
 
 void consumerWork() {
-    sleep( SLEEP_TIME );
+    usleep( SLEEP_TIME * 1000 );
     int run = 0;
-
     sem_wait( consimgCounterSem );
     run = 0;
     (*consumerImageCounter)++;
