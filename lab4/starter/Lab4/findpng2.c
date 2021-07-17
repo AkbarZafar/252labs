@@ -682,8 +682,6 @@ int main( int argc, char** argv )
     pthread_mutex_lock( &toVisitMutex );
     toVisit.length = 0;
 
-//    addToVisitList( (xmlChar*) URL );
-    
     toVisit.value[toVisit.length] = URL;
     toVisit.length++;
 
