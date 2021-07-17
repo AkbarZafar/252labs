@@ -4,20 +4,20 @@
 CC = gcc 
 CFLAGS_XML2 = $(shell xml2-config --cflags)
 CFLAGS_CURL = $(shell curl-config --cflags)
-CFLAGS = -Wall $(CFLAGS_XML2) $(CFLAGS_CURL) -std=gnu99 -g -DDEBUG1_
+CFLAGS = -Wall $(CFLAGS_XML2) $(CFLAGS_CURL) -std=gnu99 -g -DDEBUG1_ -lssl -lm -pthread -lcrypto
 LD = gcc
-LDFLAGS = -std=gnu99 -g 
+LDFLAGS = -std=c99 -g 
 LDLIBS_XML2 = $(shell xml2-config --libs)
 LDLIBS_CURL = $(shell curl-config --libs)
-LDLIBS = $(LDLIBS_XML2) $(LDLIBS_CURL) 
+LDLIBS = $(LDLIBS_XML2) $(LDLIBS_CURL) -pthread 
 
 SRCS   = findpng2.c
 OBJS3  = findpng2.o
-TARGETS= findpng2.out
+TARGETS= findpng2
 
 all: ${TARGETS}
 
-findpng2.out: $(OBJS3) 
+findpng2: $(OBJS3) 
 	$(LD) -o $@ $^ $(LDLIBS) $(LDFLAGS) 
 
 %.o: %.c 
@@ -30,4 +30,4 @@ findpng2.out: $(OBJS3)
 
 .PHONY: clean
 clean:
-	rm -f *~ *.d *.o $(TARGETS) *.png *.html
+	rm -f *~ *.d *.o $(TARGETS) *.png *.html *.txt
