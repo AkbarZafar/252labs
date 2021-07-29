@@ -76,7 +76,7 @@ int checkIfPNG( char* fileName );
 
 htmlDocPtr mem_getdoc(char *buf, int size, const char *url)
 {
-    int opts = HTML_PARSE_NOBLANKS | HTML_PARSE_NOERROR | \
+    int opts = HTML_PARSE_NOBLANKS | HTML_PARSE_NOERROR | 
                HTML_PARSE_NOWARNING | HTML_PARSE_NONET;
     htmlDocPtr doc = htmlReadMemory(buf, size, url, NULL, opts);
     
@@ -606,11 +606,22 @@ void runner( ) {
             }
         }        
         
-        if( MCSize <= connections && MCSize > 0) {
+        if( MCSize > 0) {
         
             /* get it! */
             curl_multi_perform(cm, &still_running);
-            
+            do {
+                int numfds=0;
+                int res = curl_multi_wait(cm, NULL, 0, MAX_WAIT_MSECS, &numfds);
+                if(res != CURLM_OK) {
+                    fprintf(stderr, "error: curl_multi_wait() returned %d\n", res);
+                    return;
+                }
+                curl_multi_perform(cm, &still_running);
+
+            } while(still_running);
+
+
             while ((msg = curl_multi_info_read(cm, &msgs_left)) && (msg->msg == CURLMSG_DONE) ) {
                 RECV_BUF *buf;
                 CURL *eh = msg->easy_handle;
@@ -625,7 +636,9 @@ void runner( ) {
                 }
 
                 curl_easy_getinfo(eh, CURLINFO_PRIVATE, &buf);
-                process_data(eh, buf);
+                //if( run ){
+                    process_data(eh, buf);
+                //}
 
                 curl_multi_remove_handle(cm, eh);
                 MCSize--;
